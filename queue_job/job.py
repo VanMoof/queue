@@ -18,6 +18,7 @@ from .exception import (NoSuchJobError,
 
 PENDING = 'pending'
 ENQUEUED = 'enqueued'
+CANCELLED = 'cancelled'
 DONE = 'done'
 STARTED = 'started'
 FAILED = 'failed'
@@ -26,6 +27,7 @@ STATES = [(PENDING, 'Pending'),
           (ENQUEUED, 'Enqueued'),
           (STARTED, 'Started'),
           (DONE, 'Done'),
+          (CANCELLED, 'Cancelled'),
           (FAILED, 'Failed')]
 
 DEFAULT_PRIORITY = 10  # used by the PriorityQueue to sort the jobs
@@ -286,6 +288,9 @@ class Job(object):
         if stored.date_done:
             job_.date_done = stored.date_done
 
+        if stored.date_cancelled:
+            job_.date_cancelled = stored.date_cancelled
+
         job_.state = stored.state
         job_.result = stored.result if stored.result else None
         job_.exc_info = stored.exc_info if stored.exc_info else None
@@ -436,6 +441,7 @@ class Job(object):
         self.date_enqueued = None
         self.date_started = None
         self.date_done = None
+        self.date_cancelled = None
 
         self.result = None
         self.exc_info = None
@@ -494,6 +500,7 @@ class Job(object):
                 'date_enqueued': False,
                 'date_started': False,
                 'date_done': False,
+                'date_cancelled': False,
                 'eta': False,
                 'identity_key': False,
                 }
@@ -504,6 +511,8 @@ class Job(object):
             vals['date_started'] = self.date_started
         if self.date_done:
             vals['date_done'] = self.date_done
+        if self.date_cancelled:
+            vals['date_cancelled'] = self.date_cancelled
         if self.eta:
             vals['eta'] = self.eta
         if self.identity_key:
@@ -595,6 +604,7 @@ class Job(object):
         self.date_enqueued = None
         self.date_started = None
         self.date_done = None
+        self.date_cancelled = None
         if reset_retry:
             self.retry = 0
         if result is not None:
@@ -613,6 +623,12 @@ class Job(object):
         self.state = DONE
         self.exc_info = None
         self.date_done = datetime.now()
+        if result is not None:
+            self.result = result
+
+    def set_cancelled(self, result=None):
+        self.state = CANCELLED
+        self.date_cancelled = datetime.now()
         if result is not None:
             self.result = result
 
