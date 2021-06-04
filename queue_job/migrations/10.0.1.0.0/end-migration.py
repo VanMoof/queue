@@ -32,6 +32,11 @@ def migrate(cr, version):
             })
     # recompute func_string after other addons have adapted their
     # args/kwargs/record_ids
+
+    # DEFERRED because the models defined in our custom modules are only
+    # available in the target version and not yet in 10.0
+    return
+
     records = env["queue.job"].search([])
     total = len(records)
     count = 0
