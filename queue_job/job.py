@@ -55,7 +55,7 @@ class DelayableRecordset(object):
 
     def __init__(self, recordset, priority=None, eta=None,
                  max_retries=None, description=None, channel=None,
-                 identity_key=None):
+                 identity_key=None, sequence_group=None):
         self.recordset = recordset
         self.priority = priority
         self.eta = eta
@@ -63,6 +63,7 @@ class DelayableRecordset(object):
         self.description = description
         self.channel = channel
         self.identity_key = identity_key
+        self.sequence_group = sequence_group
 
     def __getattr__(self, name):
         if name in self.recordset:
@@ -87,7 +88,8 @@ class DelayableRecordset(object):
                                eta=self.eta,
                                description=self.description,
                                channel=self.channel,
-                               identity_key=self.identity_key)
+                               identity_key=self.identity_key,
+                               sequence_group=self.sequence_group)
         return delay
 
     def __str__(self):
@@ -272,7 +274,8 @@ class Job(object):
         job_ = cls(method, args=args, kwargs=kwargs,
                    priority=stored.priority, eta=eta, job_uuid=stored.uuid,
                    description=stored.name, channel=stored.channel,
-                   identity_key=stored.identity_key)
+                   identity_key=stored.identity_key,
+                   sequence_group=stored.sequence_group)
 
         if stored.date_created:
             job_.date_created = stored.date_created
@@ -296,6 +299,7 @@ class Job(object):
         if stored.company_id:
             job_.company_id = stored.company_id.id
         job_.identity_key = stored.identity_key
+        job_.sequence_group = stored.sequence_group
         return job_
 
     def job_record_with_same_identity_key(self):
@@ -310,7 +314,7 @@ class Job(object):
     @classmethod
     def enqueue(cls, func, args=None, kwargs=None,
                 priority=None, eta=None, max_retries=None, description=None,
-                channel=None, identity_key=None):
+                channel=None, identity_key=None, sequence_group=None):
         """Create a Job and enqueue it in the queue. Return the job uuid.
 
         This expects the arguments specific to the job to be already extracted
@@ -323,7 +327,8 @@ class Job(object):
         new_job = cls(func=func, args=args,
                       kwargs=kwargs, priority=priority, eta=eta,
                       max_retries=max_retries, description=description,
-                      channel=channel, identity_key=identity_key)
+                      channel=channel, identity_key=identity_key,
+                      sequence_group=sequence_group)
         if new_job.identity_key:
             existing = new_job.job_record_with_same_identity_key()
             if existing:
@@ -354,7 +359,8 @@ class Job(object):
     def __init__(self, func,
                  args=None, kwargs=None, priority=None,
                  eta=None, job_uuid=None, max_retries=None,
-                 description=None, channel=None, identity_key=None):
+                 description=None, channel=None, identity_key=None,
+                 sequence_group=None):
         """ Create a Job
 
         :param func: function to execute
@@ -378,6 +384,9 @@ class Job(object):
         :param identity_key: A hash to uniquely identify a job, or a function
                              that returns this hash (the function takes the job
                              as argument)
+        :param sequence_group: Used to group jobs based in ir.sequence to prevent
+                               jobs failing regularly when a nogaps sequence is
+                               used.
         :param env: Odoo Environment
         :type env: :class:`odoo.api.Environment`
         """
@@ -496,6 +505,7 @@ class Job(object):
                 'date_done': False,
                 'eta': False,
                 'identity_key': False,
+                'sequence_group': self.sequence_group,
                 }
 
         if self.date_enqueued:
