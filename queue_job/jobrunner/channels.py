@@ -192,7 +192,7 @@ class ChannelJob(object):
     """
 
     def __init__(self, db_name, channel, uuid,
-                 seq, date_created, priority, eta):
+                 seq, date_created, priority, eta, sequence_group=None):
         self.db_name = db_name
         self.channel = channel
         self.uuid = uuid
@@ -200,6 +200,7 @@ class ChannelJob(object):
         self.date_created = date_created
         self.priority = priority
         self.eta = eta
+        self.sequence_group = sequence_group
 
     def __repr__(self):
         return "<ChannelJob %s>" % self.uuid
@@ -560,18 +561,47 @@ class Channel(object):
                 _logger.debug("channel %s unpaused at %s", self, now)
         # yield jobs that are ready to run, while we have capacity
         while self.has_capacity():
+        _deferred = SafeSet()
             job = self._queue.pop(now)
             if not job:
+                for job in _deferred:
+                    self._queue.add(job)
                 return
+            # Maintain sequence for jobs with same sequence group
+            running_sequence_jobs = filter(
+                lambda j: j.sequence_group == job.sequence_group,
+                self._running)
+            _logger.debug("running sequence %s" % running_sequence_jobs)
+            _logger.debug("running %s" % self._running)
+            deferred_sequence_jobs = filter(
+                lambda j: j.sequence_group == job.sequence_group,
+                _deferred)
+            _logger.debug("defer sequence %s" % deferred_sequence_jobs)
+            if job.sequence_group and (running_sequence_jobs or deferred_sequence_jobs):
+                _deferred.add(job)
+                _logger.debug("job %s re-queued because job %s with same "
+                              "sequence group %s is already running "
+                              "in channel %s",
+                              job.uuid,
+                              map(lambda j: j.uuid, running_sequence_jobs) or
+                              map(lambda j: j.uuid, deferred_sequence_jobs),
+                              job.sequence_group,
+                              self)
+                break
             self._running.add(job)
             _logger.debug("job %s marked running in channel %s",
                           job.uuid, self)
             yield job
             if self.throttle:
-                self._pause_until = now + self.throttle
-                _logger.debug("pausing channel %s until %s",
-                              self, self._pause_until)
-                return
+                if _deferred:
+                    _logger.debug("Throttling deferred jobs is not implemented")
+                else:
+                    self._pause_until = now + self.throttle
+                    _logger.debug("pausing channel %s until %s",
+                                  self, self._pause_until)
+                    return
+        for job in _deferred:
+            self._queue.add(job)
 
     def get_wakeup_time(self, wakeup_time=0):
         if not self.has_capacity():
@@ -997,7 +1027,7 @@ class ChannelManager(object):
         return parent
 
     def notify(self, db_name, channel_name, uuid,
-               seq, date_created, priority, eta, state):
+               seq, date_created, priority, eta, state, sequence_group=None):
         try:
             channel = self.get_channel_by_name(channel_name)
         except ChannelNotFound:
@@ -1024,7 +1054,7 @@ class ChannelManager(object):
                 job = None
         if not job:
             job = ChannelJob(db_name, channel, uuid,
-                             seq, date_created, priority, eta)
+                             seq, date_created, priority, eta, sequence_group)
             self._jobs_by_uuid[uuid] = job
         # state transitions
         if not state or state == DONE:
