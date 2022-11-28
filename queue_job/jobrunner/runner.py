@@ -305,7 +305,7 @@ class Database(object):
         # adding the where conditions, values are added later properly with
         # parameters
         query = ("SELECT channel, uuid, id as seq, date_created, "
-                 "priority, EXTRACT(EPOCH FROM eta), state "
+                 "priority, EXTRACT(EPOCH FROM eta), state, sequence_group "
                  "FROM queue_job WHERE %s" %
                  (where, ))
         with closing(self.conn.cursor("select_jobs", withhold=True)) as cr:
