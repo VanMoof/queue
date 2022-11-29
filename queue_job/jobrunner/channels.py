@@ -569,26 +569,17 @@ class Channel(object):
                     self._queue.add(job)
                 return
             # Maintain sequence for jobs with same sequence group
-            running_sequence_jobs = filter(
-                lambda j: j.sequence_group == job.sequence_group,
-                self._running)
-            _logger.debug("running sequence %s" % running_sequence_jobs)
-            _logger.debug("running %s" % self._running)
-            deferred_sequence_jobs = filter(
-                lambda j: j.sequence_group == job.sequence_group,
-                _deferred)
-            _logger.debug("defer sequence %s" % deferred_sequence_jobs)
-            if job.sequence_group and (running_sequence_jobs or deferred_sequence_jobs):
-                _deferred.add(job)
-                _logger.debug("job %s re-queued because job %s with same "
-                              "sequence group %s is already running "
-                              "in channel %s",
-                              job.uuid,
-                              map(lambda j: j.uuid, running_sequence_jobs) or
-                              map(lambda j: j.uuid, deferred_sequence_jobs),
-                              job.sequence_group,
-                              self)
-                continue
+            if job.sequence_group:
+                if any(j.sequence_group == job.sequence_group
+                       for j in self._running):
+                    _deferred.add(job)
+                    _logger.debug("job %s re-queued because a job with the same "
+                                  "sequence group %s is already running "
+                                  "in channel %s",
+                                  job.uuid,
+                                  job.sequence_group,
+                                  self)
+                    continue
             self._running.add(job)
             _logger.debug("job %s marked running in channel %s",
                           job.uuid, self)
