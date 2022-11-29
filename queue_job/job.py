@@ -303,7 +303,7 @@ class Job(object):
         if stored.company_id:
             job_.company_id = stored.company_id.id
         job_.identity_key = stored.identity_key
-        job_.sequence_group = stored.sequence_group
+        job_.sequence_group = stored.sequence_group if stored.sequence_group else None
         return job_
 
     def job_record_with_same_identity_key(self):
