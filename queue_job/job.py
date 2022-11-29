@@ -243,6 +243,10 @@ class Job(object):
         be added to a channel if the existing job with the same key is not yet
         started or executed.
 
+    .. attribute::sequence_group
+
+        Process jobs sequentially if they have the same sequence_group.
+
     """
     @classmethod
     def load(cls, env, job_uuid):
