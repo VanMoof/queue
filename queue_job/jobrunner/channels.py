@@ -112,6 +112,7 @@ class SafeSet(set):
     0
     >>> s.remove(1)
     """
+
     def remove(self, o):
         # pylint: disable=missing-return,except-pass
         try:
@@ -560,8 +561,8 @@ class Channel(object):
                 self._pause_until = 0
                 _logger.debug("channel %s unpaused at %s", self, now)
         # yield jobs that are ready to run, while we have capacity
-        while self.has_capacity():
         _deferred = SafeSet()
+        while self.has_capacity():
             job = self._queue.pop(now)
             if not job:
                 for job in _deferred:
@@ -587,7 +588,7 @@ class Channel(object):
                               map(lambda j: j.uuid, deferred_sequence_jobs),
                               job.sequence_group,
                               self)
-                break
+                continue
             self._running.add(job)
             _logger.debug("job %s marked running in channel %s",
                           job.uuid, self)
