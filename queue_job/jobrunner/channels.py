@@ -193,7 +193,7 @@ class ChannelJob(object):
     """
 
     def __init__(self, db_name, channel, uuid,
-                 seq, date_created, priority, eta, sequence_group=None):
+                 seq, date_created, priority, eta, model_name=None, method_name=None, rule_name=None, rule_value=None):
         self.db_name = db_name
         self.channel = channel
         self.uuid = uuid
@@ -201,7 +201,10 @@ class ChannelJob(object):
         self.date_created = date_created
         self.priority = priority
         self.eta = eta
-        self.sequence_group = sequence_group
+        self.rule_value = rule_value
+        self.rule_name = rule_name
+        self.model_name = model_name
+        self.method_name = method_name
 
     def __repr__(self):
         return "<ChannelJob %s>" % self.uuid
@@ -527,6 +530,56 @@ class Channel(object):
             return True
         return len(self._running) < self.capacity
 
+    def get_matching_rule(self, job):
+        """Check if a running job has a matching QueueSequenceRule.
+
+        The QueueSequenceRule defines a field on a model.
+        This method checks if the field's value for the related record of job matches
+        that of any running job.
+
+        To avoid performance issues, we store the value on the job. The implication is that if field values
+        on the related record are modified between the job creation and execution, the job will be run with undefined
+        behavior (either sequential or not). Modify queue_job.rule_value during the write on the related record to avoid
+        this.
+
+        :return: (str) QueueSequenceRule.name which matches with job and a running job or None
+
+        >>> from pprint import pprint as pp
+        >>> cm = ChannelManager()
+        >>> cm.simple_configure('root:4,A:4')
+
+        # Test matching rule for a channel with capacity 4
+        >>> db = 'db'
+        # db_name, channel_name, uuid, seq, date_created, priority, eta, state,
+        # method_name=None, rule_name=None, rule_value=None
+        >>> cm.notify(db, 'A', 'A1', 1, 0, 10, None, 'pending', 'model_a', 'method_a', 'rule_a', '1')
+        >>> cm.notify(db, 'A', 'A2', 2, 0, 10, None, 'pending', 'model_a', 'method_a', 'rule_a', '1')
+        >>> cm.notify(db, 'A', 'A3', 3, 0, 10, None, 'pending', 'model_a', 'method_a', 'rule_a', '1')
+        >>> cm.notify(db, 'A', 'A4', 4, 0, 10, None, 'pending', 'model_a', 'method_a', 'rule_a', '2')
+        >>> pp(list(cm.get_jobs_to_run(now=100)))
+        # A2 has the same method_name and rule_value as A1, so it has to wait until A1 is done.
+        # A4 runs concurrently because it has a different rule_value.
+        [<ChannelJob A1>, <ChannelJob A4>]
+        >>> cm.notify(db, 'A', 'A1', 1, 0, 10, None, 'done', 'model_a', 'method_a', 'rule_a', '1')
+        >>> pp(list(cm.get_jobs_to_run(now=100)))
+        [<ChannelJob A2>]
+        >>> cm.notify(db, 'A', 'A2', 1, 0, 10, None, 'done', 'model_a', 'method_a', 'rule_a', '1')
+        >>> pp(list(cm.get_jobs_to_run(now=100)))
+        # Finally, A3 is run
+        [<ChannelJob A3>]
+        """
+        # Channel doesn't have env, so we set values during the job init.
+        # Note that job.model_name does not guarantee the same related record model; see automatic.workflow.job.
+        # Likewise a method name can arbitrarily be the same. So we check both.
+        if job.rule_value and any(
+            job.rule_value == running_job.rule_value
+            for running_job in self._running
+            if running_job.method_name == job.method_name
+            and running_job.model_name == job.model_name
+        ):
+            return job.rule_name
+        return None
+
     def get_jobs_to_run(self, now):
         """Get jobs that are ready to run in channel.
 
@@ -569,17 +622,20 @@ class Channel(object):
                     self._queue.add(job)
                 return
             # Maintain sequence for jobs with same sequence group
-            if job.sequence_group:
-                if any(j.sequence_group == job.sequence_group
-                       for j in self._running):
-                    _deferred.add(job)
-                    _logger.debug("job %s re-queued because a job with the same "
-                                  "sequence group %s is already running "
-                                  "in channel %s",
-                                  job.uuid,
-                                  job.sequence_group,
-                                  self)
-                    continue
+            # rule_value is computed on job creation. This means that existing jobs will not have it.
+            # On the view: forbid changing model once a rule has been saved, because once a rule has been assigned to
+            # a job, changing the model on the rule will mean a mismatch between the job's model and the rule's
+            # model.
+            matching_rule = self.get_matching_rule(job)
+            if matching_rule:
+                _deferred.add(job)
+                _logger.debug("job %s re-queued because a job with the same "
+                              "sequence rule '%s' is already running "
+                              "in channel %s",
+                              job.uuid,
+                              matching_rule,
+                              self)
+                continue
             self._running.add(job)
             _logger.debug("job %s marked running in channel %s",
                           job.uuid, self)
@@ -1019,7 +1075,8 @@ class ChannelManager(object):
         return parent
 
     def notify(self, db_name, channel_name, uuid,
-               seq, date_created, priority, eta, state, sequence_group=None):
+               seq, date_created, priority, eta, state, model_name=None, method_name=None, rule_name=None,
+               rule_value=None):
         try:
             channel = self.get_channel_by_name(channel_name)
         except ChannelNotFound:
@@ -1046,7 +1103,7 @@ class ChannelManager(object):
                 job = None
         if not job:
             job = ChannelJob(db_name, channel, uuid,
-                             seq, date_created, priority, eta, sequence_group)
+                             seq, date_created, priority, eta, model_name, method_name, rule_name, rule_value)
             self._jobs_by_uuid[uuid] = job
         # state transitions
         if not state or state == DONE:

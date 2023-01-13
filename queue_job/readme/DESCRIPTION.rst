@@ -48,3 +48,6 @@ Features:
   description, number of retries
 * Related Actions: link an action on the job view, such as open the record
   concerned by the job
+* Sequence Rules: specify a model and a field for which the value on the
+  related records act like a key which determine if a job should be run
+  in sequence or not.
