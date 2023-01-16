@@ -471,11 +471,11 @@ class Job(object):
         # to pick automatic.workflow.job, which doesn't have the fields of the invoice model.
         if self.model_name == 'automatic.workflow.job':
             model_name = 'account.invoice'
-            record_ids = self.env[model_name].browse(self.args)
+            record_ids = self.env[model_name].sudo().browse(self.args)
         else:
             model_name = self.model_name
             record_ids = self.recordset
-        sequence_rules = env['queue.sequence.rule'].search([('model_id.model', '=', model_name)])
+        sequence_rules = env['queue.sequence.rule'].sudo().search([('model_id.model', '=', model_name)])
         if sequence_rules:
             self.sequence_rule_ids = [(6, 0, sequence_rules.ids)]
             # Change the following when implementing multiple rules per model
@@ -494,6 +494,8 @@ class Job(object):
                     self.rule_value = value
         else:
             self.sequence_rule_ids = None
+            self.rule_name = None
+            self.rule_value = None
 
     def perform(self):
         """Execute the job.
