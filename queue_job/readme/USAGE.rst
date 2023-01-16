@@ -45,3 +45,9 @@ Through the time, two main patterns emerged:
 
 1. For data exposed to users, a model should store the data and the model should be the creator of the job. The job is kept hidden from the users
 2. For technical data, that are not exposed to the users, it is generally alright to create directly jobs with data passed as arguments to the job, without intermediary models.
+
+Sequence Rules
+~~~~~~~~~~~~~~
+In the Job Queue/Sequence Rules menu define a new rule having a model and a field. 
+Newly created jobs will acquire the field values from related records at the time the job is created.
+For rules which match, the jobs will be run in sequence.

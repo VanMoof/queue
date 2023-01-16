@@ -55,7 +55,7 @@ class DelayableRecordset(object):
 
     def __init__(self, recordset, priority=None, eta=None,
                  max_retries=None, description=None, channel=None,
-                 identity_key=None):
+                 identity_key=None, sequence_rule_ids=None):
         self.recordset = recordset
         self.priority = priority
         self.eta = eta
@@ -63,6 +63,7 @@ class DelayableRecordset(object):
         self.description = description
         self.channel = channel
         self.identity_key = identity_key
+        self.sequence_rule_ids = sequence_rule_ids
 
     def __getattr__(self, name):
         if name in self.recordset:
@@ -87,7 +88,8 @@ class DelayableRecordset(object):
                                eta=self.eta,
                                description=self.description,
                                channel=self.channel,
-                               identity_key=self.identity_key)
+                               identity_key=self.identity_key,
+                               sequence_rule_ids=self.sequence_rule_ids)
         return delay
 
     def __str__(self):
@@ -241,6 +243,10 @@ class Job(object):
         be added to a channel if the existing job with the same key is not yet
         started or executed.
 
+    .. attribute::sequence_rule_ids
+
+        Reference to rules to process jobs sequentially.
+
     """
     @classmethod
     def load(cls, env, job_uuid):
@@ -272,7 +278,8 @@ class Job(object):
         job_ = cls(method, args=args, kwargs=kwargs,
                    priority=stored.priority, eta=eta, job_uuid=stored.uuid,
                    description=stored.name, channel=stored.channel,
-                   identity_key=stored.identity_key)
+                   identity_key=stored.identity_key,
+                   sequence_rule_ids=stored.sequence_rule_ids)
 
         if stored.date_created:
             job_.date_created = stored.date_created
@@ -296,6 +303,7 @@ class Job(object):
         if stored.company_id:
             job_.company_id = stored.company_id.id
         job_.identity_key = stored.identity_key
+        job_.sequence_rule_ids = stored.sequence_rule_ids if stored.sequence_rule_ids else None
         return job_
 
     def job_record_with_same_identity_key(self):
@@ -310,7 +318,7 @@ class Job(object):
     @classmethod
     def enqueue(cls, func, args=None, kwargs=None,
                 priority=None, eta=None, max_retries=None, description=None,
-                channel=None, identity_key=None):
+                channel=None, identity_key=None, sequence_rule_ids=None):
         """Create a Job and enqueue it in the queue. Return the job uuid.
 
         This expects the arguments specific to the job to be already extracted
@@ -323,7 +331,8 @@ class Job(object):
         new_job = cls(func=func, args=args,
                       kwargs=kwargs, priority=priority, eta=eta,
                       max_retries=max_retries, description=description,
-                      channel=channel, identity_key=identity_key)
+                      channel=channel, identity_key=identity_key,
+                      sequence_rule_ids=sequence_rule_ids)
         if new_job.identity_key:
             existing = new_job.job_record_with_same_identity_key()
             if existing:
@@ -354,7 +363,8 @@ class Job(object):
     def __init__(self, func,
                  args=None, kwargs=None, priority=None,
                  eta=None, job_uuid=None, max_retries=None,
-                 description=None, channel=None, identity_key=None):
+                 description=None, channel=None, identity_key=None,
+                 sequence_rule_ids=None):
         """ Create a Job
 
         :param func: function to execute
@@ -378,6 +388,7 @@ class Job(object):
         :param identity_key: A hash to uniquely identify a job, or a function
                              that returns this hash (the function takes the job
                              as argument)
+        :param sequence_rule_ids: Reference to rules to process jobs sequentially.
         :param env: Odoo Environment
         :type env: :class:`odoo.api.Environment`
         """
@@ -454,6 +465,37 @@ class Job(object):
         self._eta = None
         self.eta = eta
         self.channel = channel
+        # Handle automatic.workflow.job, normally it is a normal model name.
+        # In practice only _validate_invoice_job is called through automatic.workflow.job
+        # This allows the user to select the field on account.invoice, instead of having
+        # to pick automatic.workflow.job, which doesn't have the fields of the invoice model.
+        if self.model_name == 'automatic.workflow.job':
+            model_name = 'account.invoice'
+            record_ids = self.env[model_name].sudo().browse(self.args)
+        else:
+            model_name = self.model_name
+            record_ids = self.recordset
+        sequence_rules = env['queue.sequence.rule'].sudo().search([('model_id.model', '=', model_name)])
+        if sequence_rules:
+            self.sequence_rule_ids = [(6, 0, sequence_rules.ids)]
+            # Change the following when implementing multiple rules per model
+            self.rule_name = sequence_rules[0].name
+            if len(sequence_rules) > 1:
+                _logger.warning('More than one sequence rule defined for %s',
+                                self.model_name)
+            if len(record_ids) > 1:
+                _logger.warning(
+                    'Applying sequence rule for job %s failed because it has multiple related '
+                    'records.', self.uuid
+                )
+            else:
+                for rule in sequence_rules:
+                    value = str(record_ids[rule.field_id.name])
+                    self.rule_value = value
+        else:
+            self.sequence_rule_ids = None
+            self.rule_name = None
+            self.rule_value = None
 
     def perform(self):
         """Execute the job.
@@ -496,6 +538,7 @@ class Job(object):
                 'date_done': False,
                 'eta': False,
                 'identity_key': False,
+                'sequence_rule_ids': self.sequence_rule_ids if self.sequence_rule_ids else None,
                 }
 
         if self.date_enqueued:
@@ -522,6 +565,8 @@ class Job(object):
                          'model_name': self.model_name,
                          'method_name': self.method_name,
                          'record_ids': self.recordset.ids,
+                         'rule_name': self.rule_name,
+                         'rule_value': self.rule_value,
                          'args': self.args,
                          'kwargs': self.kwargs,
                          })

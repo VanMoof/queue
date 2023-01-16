@@ -90,6 +90,9 @@ class QueueJob(models.Model):
                           index=True)
 
     identity_key = fields.Char()
+    sequence_rule_ids = fields.Many2many(comodel_name='queue.sequence.rule', string='Sequence Rules')
+    rule_name = fields.Char(string='Sequence Rule', readonly=True)
+    rule_value = fields.Char(string='Rule Value', readonly=True)
 
     @api.model_cr
     def init(self):
